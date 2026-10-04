@@ -183,3 +183,15 @@ button, input, textarea, select { font: inherit; }
   .wide-field { grid-column: auto; }
   .evidence-grid { grid-template-columns: 1fr; }
 }
+
+/* 工程指令与处置链 */
+.eo-panel { margin-bottom: 15px; }
+.eo-chain { display: flex; align-items: center; gap: 12px; padding: 14px; flex-wrap: wrap; }
+.eo-chain i { flex: 0 0 22px; height: 1px; background: #c3d0d8; position: relative; }
+.eo-chain i::after { content: ''; position: absolute; right: -1px; top: -3px; border: 4px solid transparent; border-left-color: #c3d0d8; }
+.eo-node { flex: 1 1 150px; border: 1px solid var(--line); border-radius: 6px; padding: 11px 13px; background: #fafcfd; display: flex; flex-direction: column; gap: 2px; }
+.eo-node span { color: var(--muted); font-size: 11px; }
+.eo-node strong { font-size: 20px; color: #0c2d4b; }
+.eo-node small { color: #6b7f8c; font-size: 10px; }
+.eo-actions { display: flex; align-items: center; gap: 8px; padding: 0 14px 14px; flex-wrap: wrap; }
+.eo-hint { color: #8a9aa5; font-size: 11px; margin-left: 4px; }

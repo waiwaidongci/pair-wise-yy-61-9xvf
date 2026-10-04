@@ -44,7 +44,7 @@ import {
   WarningRegular
 } from '@fluentui/react-icons';
 import { useGetWorkPackageQuery, useSubmitCardMutation } from './api';
-import { authorizeOverride, refreshVersion, releasePackage, selectCard, setConflict, signStage, toggleOffline, updateCard, type RootState } from './store';
+import { authorizeOverride, bumpRevision, refreshVersion, releasePackage, revokeInstruction, reviseInstruction, selectCard, setConflict, signStage, simulateConcurrentCommit, toggleOffline, updateCard, type RootState } from './store';
 
 type NavItem = { path: string; label: string; icon: ReactNode };
 
@@ -140,16 +140,22 @@ function Execution() {
   const [consumable, setConsumable] = useState('');
   const [witness, setWitness] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
+  const [eoNumber, setEoNumber] = useState(state.eo.eoNumber);
+  const [eoRevision, setEoRevision] = useState(state.eo.revision);
   const [submitCard] = useSubmitCardMutation();
   useEffect(() => { setMeasurement(card.measurement); setFinding(card.finding); }, [card.id, card.measurement, card.finding]);
+  useEffect(() => {
+    if (overrideOpen) { setEoNumber(state.eo.eoNumber); setEoRevision(state.eo.revision); }
+  }, [overrideOpen, state.eo.eoNumber, state.eo.revision]);
   const toleranceIssue = card.id === 'CARD-03' && Number.parseFloat(measurement) < 2850;
+  const authorizedCurrent = Boolean(card.authorization) && card.authorization!.eoRevision === state.eo.revision && state.eo.status === '有效';
   const dependenciesMet = card.dependencies.every((dependency) => state.cards.find((item) => item.id === dependency)?.status === '已完成');
   const complete = async () => {
     if (!dependenciesMet) {
       dispatch(setConflict(`前置工卡 ${card.dependencies.join('、')} 尚未完成。`));
       return;
     }
-    if (toleranceIssue) {
+    if (toleranceIssue && !authorizedCurrent) {
       dispatch(setConflict('测量值超出容差，必须由授权人员处理。'));
       return;
     }
@@ -191,12 +197,12 @@ function Execution() {
           <label className="witness-check"><Checkbox checked={witness} onChange={(_, data) => setWitness(Boolean(data.checked))} /><span><strong>见证人已现场确认</strong><small>要求：{card.witness}</small></span></label>
         </section>
         <aside className="execution-side">
-          <section className="panel card-meta"><div className="panel-head"><h2>工卡信息</h2><DocumentBulletListRegular /></div><dl><div><dt>容差</dt><dd>{card.tolerance}</dd></div><div><dt>证据要求</dt><dd>{card.evidence}</dd></div><div><dt>前置条件</dt><dd>{card.dependencies.length ? card.dependencies.join('、') : '无'}</dd></div><div><dt>阶段签署</dt><dd>{card.stage}</dd></div></dl></section>
+          <section className="panel card-meta"><div className="panel-head"><h2>工卡信息</h2><DocumentBulletListRegular /></div><dl><div><dt>容差</dt><dd>{card.tolerance}</dd></div><div><dt>证据要求</dt><dd>{card.evidence}</dd></div><div><dt>前置条件</dt><dd>{card.dependencies.length ? card.dependencies.join('、') : '无'}</dd></div><div><dt>阶段签署</dt><dd>{card.stage}</dd></div>{card.authorization && <div><dt>授权依据</dt><dd>{card.authorization.eoNumber} {card.authorization.eoRevision} · 授权号 {card.authorization.authId}</dd></div>}</dl></section>
           {card.status === '待授权' && <section className="panel override-panel"><WarningRegular /><h3>超差项目等待授权</h3><p>原始测量值已保留。授权人员可以批准工程指令、退回复测或要求停场处理。</p><Button appearance="primary" onClick={() => setOverrideOpen(true)}>授权处理</Button></section>}
           <section className="panel evidence-panel"><div className="panel-head"><h2>证据附件</h2><Badge appearance="tint">3 项</Badge></div>{['IMG_20260929_0904.jpg', '液压测试原始记录.pdf', '见证签字单_宋杰.pdf'].map((file, index) => <div className="evidence-row" key={file}><DocumentBulletListRegular /><div><strong>{file}</strong><small>{index + 1}.8 MB · 09:1{index}</small></div><Button size="small" appearance="subtle">预览</Button></div>)}</section>
         </aside>
       </div>
-      <Dialog open={overrideOpen} onOpenChange={(_, data) => setOverrideOpen(data.open)}><DialogSurface><DialogBody><DialogTitle>超差授权处理</DialogTitle><DialogContent>批准后将在工卡中记录授权人、工程指令编号与处置依据，原始测量值不会被覆盖。<Field label="工程指令编号" required className="dialog-field"><Input defaultValue="EO-2026-1147" /></Field><Field label="授权依据" required className="dialog-field"><Textarea defaultValue="按 AMM 容差分析并经工程部门确认，允许执行复测与系统恢复。" /></Field></DialogContent><DialogActions><Button appearance="secondary" onClick={() => setOverrideOpen(false)}>取消</Button><Button appearance="primary" onClick={() => { dispatch(authorizeOverride()); setOverrideOpen(false); }}>确认授权</Button></DialogActions></DialogBody></DialogSurface></Dialog>
+      <Dialog open={overrideOpen} onOpenChange={(_, data) => setOverrideOpen(data.open)}><DialogSurface><DialogBody><DialogTitle>超差授权处理</DialogTitle><DialogContent>批准后将在工卡中登记工程指令编号与修订号（授权号一并留存），原始测量值不会被覆盖。只有当前有效修订的指令才能放行继续；指令修订或撤销后本工卡须重新授权。<Field label="工程指令编号" required className="dialog-field"><Input value={eoNumber} onChange={(_, data) => setEoNumber(data.value)} /></Field><Field label="指令修订号" required hint={`当前有效修订 ${state.eo.revision}`} className="dialog-field"><Input value={eoRevision} onChange={(_, data) => setEoRevision(data.value)} /></Field><Field label="授权依据" required className="dialog-field"><Textarea defaultValue="按 AMM 容差分析并经工程部门确认，允许执行复测与系统恢复。" /></Field></DialogContent><DialogActions><Button appearance="secondary" onClick={() => setOverrideOpen(false)}>取消</Button><Button appearance="primary" onClick={() => { dispatch(authorizeOverride({ eoNumber, eoRevision })); setOverrideOpen(false); }}>确认授权</Button></DialogActions></DialogBody></DialogSurface></Dialog>
     </div>
   );
 }
@@ -207,10 +213,13 @@ function Release() {
   const [tab, setTab] = useState('open');
   const blockers = state.cards.filter((card) => card.status !== '已完成' && card.status !== '未开始');
   const allSigned = state.signatures.every((item) => item.status === '已签署');
+  const eoActive = state.eo.status === '有效';
+  const releaseDisabled = !allSigned || blockers.some((card) => card.status === '待授权') || !eoActive;
   return (
     <div className="page">
-      <PageHeading eyebrow="RELEASE REVIEW / B-7891" title="放行审阅" description="核对未关闭项目、重复缺陷、关键证据与阶段签字。" actions={<Button appearance="primary" icon={<LockClosedRegular />} disabled={!allSigned || blockers.some((card) => card.status === '待授权')} onClick={() => dispatch(releasePackage())}>{state.released ? '工作包已锁定' : '锁定并放行'}</Button>} />
-      {state.released && <MessageBar intent="success" className="top-message"><MessageBarBody>工作包已锁定，形成只读放行基线并纳入审计记录。</MessageBarBody></MessageBar>}
+      <PageHeading eyebrow="RELEASE REVIEW / B-7891" title="放行审阅" description="核对未关闭项目、重复缺陷、关键证据与阶段签字。工卡、签字与放行基线须基于同一有效工程指令修订。" actions={<Button appearance="primary" icon={<LockClosedRegular />} disabled={releaseDisabled} onClick={() => dispatch(releasePackage())}>{state.released ? '工作包已锁定' : '锁定并放行'}</Button>} />
+      {state.conflictMessage && <MessageBar intent="error" className="top-message"><MessageBarBody><strong>处置链未闭合：</strong>{state.conflictMessage}</MessageBarBody></MessageBar>}
+      {state.released && <MessageBar intent="success" className="top-message"><MessageBarBody>工作包已锁定，形成 {state.releaseEoNumber} {state.releaseEoRevision} 只读放行基线并纳入审计记录。</MessageBarBody></MessageBar>}
       <div className="release-grid">
         <section className="panel release-main">
           <TabList selectedValue={tab} onTabSelect={(_, data) => setTab(String(data.value))}><Tab value="open">未关闭项目 <Badge>{blockers.length}</Badge></Tab><Tab value="repeat">重复缺陷 <Badge>2</Badge></Tab><Tab value="evidence">关键证据 <Badge>12</Badge></Tab></TabList>
@@ -221,8 +230,8 @@ function Release() {
           </div>
         </section>
         <aside className="release-side">
-          <section className="panel signoff-card"><div className="panel-head"><h2>分阶段签字</h2><span>{state.signatures.filter((item) => item.status === '已签署').length} / 4</span></div>{state.signatures.map((item) => <div className="signoff-row" key={item.stage}><div><span>{item.stage}</span><strong>{item.actor}</strong><small>{item.time}</small></div>{item.status === '已签署' ? <Badge appearance="tint" color="success">已签署</Badge> : <Button size="small" appearance="primary" onClick={() => dispatch(signStage(item.stage))}>签署</Button>}</div>)}</section>
-          <section className="panel release-gate-card"><LockClosedRegular /><h3>放行门禁</h3><label><Checkbox checked={!blockers.some((card) => card.status === '待授权')} readOnly /> 无待授权超差项目</label><label><Checkbox checked={state.cards.filter((card) => card.status === '已完成').length >= 6} readOnly /> 关键工卡完成率 ≥ 75%</label><label><Checkbox checked={allSigned} readOnly /> 四个阶段均完成电子签署</label><label><Checkbox checked /> 审计记录和证据附件完整</label></section>
+          <section className="panel signoff-card"><div className="panel-head"><h2>分阶段签字</h2><span>{state.signatures.filter((item) => item.status === '已签署').length} / 4</span></div>{state.signatures.map((item) => <div className="signoff-row" key={item.stage}><div><span>{item.stage}</span><strong>{item.actor}</strong><small>{item.time}{item.eoRevision ? ` · ${item.eoNumber} ${item.eoRevision}` : ''}</small></div>{item.status === '已签署' ? <Badge appearance="tint" color="success">已签署</Badge> : <Button size="small" appearance="primary" disabled={!eoActive} onClick={() => dispatch(signStage(item.stage))}>签署</Button>}</div>)}</section>
+          <section className="panel release-gate-card"><LockClosedRegular /><h3>放行门禁</h3><label><Checkbox checked={!blockers.some((card) => card.status === '待授权')} readOnly /> 无待授权超差项目</label><label><Checkbox checked={state.cards.filter((card) => card.status === '已完成').length >= 6} readOnly /> 关键工卡完成率 ≥ 75%</label><label><Checkbox checked={allSigned} readOnly /> 四个阶段均完成电子签署</label><label><Checkbox checked={eoActive} readOnly /> 工程指令 {state.eo.eoNumber} {state.eo.revision} 有效</label><label><Checkbox checked /> 审计记录和证据附件完整</label></section>
         </aside>
       </div>
     </div>
@@ -231,7 +240,14 @@ function Release() {
 
 function Audit() {
   const state = useSelector((root: RootState) => root.maintenance);
+  const dispatch = useDispatch();
   const [selected, setSelected] = useState('R7');
+  const [reviseOpen, setReviseOpen] = useState(false);
+  const [newRevision, setNewRevision] = useState(bumpRevision(state.eo.revision));
+  const [expectedVersion, setExpectedVersion] = useState(state.eoVersion);
+  useEffect(() => {
+    if (reviseOpen) { setNewRevision(bumpRevision(state.eo.revision)); setExpectedVersion(state.eoVersion); }
+  }, [reviseOpen, state.eo.revision, state.eoVersion]);
   const downloadAudit = () => {
     const csv = ['时间,操作者,动作,说明', ...state.audit.map((item) => [item.time, item.actor, item.action, item.detail].join(','))].join('\n');
     const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }));
@@ -249,10 +265,28 @@ function Audit() {
   return (
     <div className="page">
       <PageHeading eyebrow="AUDIT / VERSION CONTROL" title="审计与版本差异" description="对比工卡版本、查看操作历史并导出闭环证据。" actions={<Button appearance="primary" icon={<ArrowDownloadRegular />} onClick={downloadAudit}>导出审计记录</Button>} />
+      {state.conflictMessage && <MessageBar intent="warning" className="top-message"><MessageBarBody><strong>指令提交冲突：</strong>{state.conflictMessage}</MessageBarBody></MessageBar>}
+      <section className="panel eo-panel">
+        <div className="panel-head"><div><h2>工程指令与处置链</h2><span>超差工卡、阶段签字、放行基线必须基于同一有效指令修订；修订或撤销后联动失效重算，原测量保留。</span></div><Badge appearance="tint" color={state.eo.status === '有效' ? 'success' : 'danger'}>{state.eo.status} · {state.eo.eoNumber} {state.eo.revision} · 并发版本 v{state.eoVersion}</Badge></div>
+        <div className="eo-chain">
+          <div className="eo-node"><span>授权工卡</span><strong>{state.cards.filter((card) => card.authorization?.eoRevision === state.eo.revision).length} / {state.cards.filter((card) => card.status === '待授权' || card.authorization).length}</strong><small>当前修订有效 / 待处置</small></div>
+          <i />
+          <div className="eo-node"><span>阶段签字</span><strong>{state.signatures.filter((item) => item.status === '已签署' && (item.eoRevision ?? 'R1') === state.eo.revision).length} / 4</strong><small>按 {state.eo.revision} 签署</small></div>
+          <i />
+          <div className="eo-node"><span>放行基线</span><strong>{state.released ? `${state.releaseEoRevision}` : '未形成'}</strong><small>{state.released ? '已锁定' : '待放行'}</small></div>
+        </div>
+        <div className="eo-actions">
+          <Button appearance="primary" icon={<DocumentBulletListRegular />} disabled={state.eo.status !== '有效'} onClick={() => setReviseOpen(true)}>修订指令</Button>
+          <Button appearance="secondary" icon={<WarningRegular />} disabled={state.eo.status !== '有效'} onClick={() => dispatch(revokeInstruction())}>撤销指令</Button>
+          <Button appearance="subtle" icon={<ArrowSyncRegular />} disabled={state.eo.status !== '有效'} onClick={() => dispatch(simulateConcurrentCommit())}>模拟他人同时提交</Button>
+          <span className="eo-hint">两人同时提交同一指令：先到生效，后到留冲突。</span>
+        </div>
+      </section>
       <div className="audit-grid">
         <section className="panel diff-panel"><div className="panel-head"><div><h2>工卡版本差异</h2><span>R6 → R7 · 3 处变更</span></div><select value={selected} onChange={(event) => setSelected(event.target.value)}><option>R7</option><option>R6</option><option>R5</option></select></div><div className="diff-table"><div className="diff-head"><span>工卡</span><span>字段</span><span>原值</span><span>新值 / 原因</span></div>{diffs.map((diff) => <div className="diff-row" key={`${diff.card}-${diff.field}`}><strong>{diff.card}</strong><span>{diff.field}</span><del>{diff.from}</del><div><ins>{diff.to}</ins><small>{diff.reason}</small></div></div>)}</div></section>
         <section className="panel audit-panel"><div className="panel-head"><div><h2>完整审计时间线</h2><span>{state.audit.length} 条记录</span></div><HistoryRegular /></div>{state.audit.map((item, index) => <div className="audit-row" key={`${item.time}-${index}`}><span className="timeline-dot" /><div><strong>{item.action}</strong><p>{item.detail}</p><small>{item.time} · {item.actor}</small></div></div>)}</section>
       </div>
+      <Dialog open={reviseOpen} onOpenChange={(_, data) => setReviseOpen(data.open)}><DialogSurface><DialogBody><DialogTitle>修订工程指令</DialogTitle><DialogContent>提交后指令升级至新修订，授权工卡、阶段签字与放行基线将立即失效重算（原测量保留）。并发版本 v{expectedVersion}，若期间他人已先行提交，本次将留冲突。<Field label="指令号" className="dialog-field"><Input value={state.eo.eoNumber} readOnly /></Field><Field label="新修订号" hint={`当前 ${state.eo.revision}`} className="dialog-field"><Input value={newRevision} onChange={(_, data) => setNewRevision(data.value)} /></Field></DialogContent><DialogActions><Button appearance="secondary" onClick={() => setReviseOpen(false)}>取消</Button><Button appearance="primary" onClick={() => { dispatch(reviseInstruction({ eoNumber: state.eo.eoNumber, revision: newRevision, expectedVersion })); setReviseOpen(false); }}>提交修订</Button></DialogActions></DialogBody></DialogSurface></Dialog>
     </div>
   );
 }
