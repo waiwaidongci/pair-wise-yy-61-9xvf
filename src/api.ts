@@ -39,6 +39,11 @@ const packageData = {
   ] as WorkCard[]
 };
 
+// 服务器端工程指令状态：用于演示并发提交时“先到生效、后到留冲突”
+const eoServerState: Record<string, { revision: number; status: '有效' | '已撤销' }> = {
+  'EO-2026-1147': { revision: 1, status: '有效' }
+};
+
 const mockBaseQuery: BaseQueryFn = async (arg) => {
   await new Promise((resolve) => setTimeout(resolve, 180));
   if (typeof arg === 'string' && arg === 'package') return { data: packageData };
@@ -67,8 +72,37 @@ export const maintenanceApi = createApi({
         return { data: { accepted: true, revision: packageData.serverRevision + 1 } };
       },
       invalidatesTags: ['Package']
+    }),
+    // 工程指令改版/撤销提交：基于期望修订号校验，先到者生效，后到者 409 留冲突
+    submitEoChange: builder.mutation<
+      { accepted: boolean; revision: number; status: string },
+      { eoId: string; changeType: 'revise' | 'revoke'; expectedRevision: number; submittedBy: string }
+    >({
+      queryFn: async (payload) => {
+        // 随机延迟模拟真实网络，并发提交时先到者生效
+        await new Promise((resolve) => setTimeout(resolve, 150 + Math.random() * 250));
+        const server = eoServerState[payload.eoId];
+        if (!server) {
+          return { error: { status: 404, data: { message: `工程指令 ${payload.eoId} 未登记。` } } };
+        }
+        if (payload.expectedRevision !== server.revision || server.status !== '有效') {
+          return {
+            error: {
+              status: 409,
+              data: {
+                message: `版本冲突：${payload.submittedBy} 基于 R${payload.expectedRevision} 提交，服务器当前为 R${server.revision}${server.status === '已撤销' ? '（已撤销）' : ''}，本次提交保留为冲突。`,
+                serverRevision: server.revision
+              }
+            }
+          };
+        }
+        if (payload.changeType === 'revise') server.revision += 1;
+        else server.status = '已撤销';
+        return { data: { accepted: true, revision: server.revision, status: server.status } };
+      },
+      invalidatesTags: ['Package']
     })
   })
 });
 
-export const { useGetWorkPackageQuery, useSubmitCardMutation } = maintenanceApi;
+export const { useGetWorkPackageQuery, useSubmitCardMutation, useSubmitEoChangeMutation } = maintenanceApi;
